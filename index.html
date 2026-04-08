@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Colored Message Maze</title>
+<style>
+:root { --bg:#0a0d15; --panel:#101522; --line:#2a3344; --text:#eef2f7; --muted:#b6c2d5; }
+* { box-sizing:border-box; }
+body { margin:0; background:radial-gradient(circle at top,#12192a 0%, var(--bg) 60%); color:var(--text); font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif; }
+.wrap { max-width:1188px; margin:18px auto; padding:12px; }
+.stage { position:relative; width:1108px; height:672px; margin:0 auto; border-radius:20px; overflow:hidden; background:#0d1320; border:1px solid rgba(255,255,255,.12); box-shadow:0 14px 40px rgba(0,0,0,.35); }
+.row { display:grid; grid-template-columns:768px 340px; width:100%; height:512px; }
+.screen-wrap { position:relative; width:768px; height:512px; background:#0d1320; }
+.screen { width:768px; height:512px; display:block; background:#0d1320; }
+.overlay { position:absolute; left:14px; top:14px; padding:10px 14px; border-radius:14px; background:rgba(7,10,16,.75); color:#f1f5fb; font-size:14px; font-weight:700; letter-spacing:.02em; line-height:1.4; white-space:pre-line; backdrop-filter: blur(4px); z-index:3; }
+.minimap-wrap { position:absolute; right:14px; top:14px; width:220px; height:220px; padding:8px; border-radius:16px; background:rgba(7,10,16,.78); border:1px solid rgba(255,255,255,.14); box-shadow:0 8px 24px rgba(0,0,0,.32); backdrop-filter: blur(4px); z-index:2; }
+.minimap-title { position:absolute; left:12px; top:8px; font-size:12px; font-weight:800; color:#f1f5fb; letter-spacing:.04em; pointer-events:none; z-index:3; }
+.minimap { width:100%; height:100%; display:block; border-radius:10px; background:#0d1320; margin-top:10px; }
+.side { height:512px; padding:16px; background:linear-gradient(180deg, rgba(12,17,28,.96), rgba(10,13,21,.98)); border-left:1px solid rgba(255,255,255,.08); }
+.side-card { height:100%; border-radius:16px; padding:18px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); display:flex; flex-direction:column; gap:12px; }
+.side-card h2 { margin:0; font-size:24px; line-height:1.2; }
+.message-body { margin:0; color:var(--text); font-size:16px; line-height:1.7; white-space:normal; }
+.message-empty { margin:0; color:var(--muted); font-size:16px; line-height:1.7; }
+.controls { position:absolute; left:0; right:0; bottom:0; height:160px; display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:14px; padding:16px 18px; background:linear-gradient(180deg, rgba(10,13,21,.92), rgba(10,13,21,.98)); border-top:1px solid rgba(255,255,255,.08); }
+.btn { min-width:124px; text-align:center; padding:14px 18px; border-radius:18px; font-size:17px; font-weight:800; text-decoration:none; box-shadow: inset 0 1px 0 rgba(255,255,255,.35); border:none; cursor:pointer; transition:transform .12s ease, opacity .12s ease; }
+.btn:active { transform:translateY(1px); }
+.btn:disabled { cursor:not-allowed; opacity:.45; box-shadow:none; color:#76839a !important; background:linear-gradient(180deg,#474f5d,#353b47) !important; }
+.btn-primary { color:#07111f; background:linear-gradient(180deg, rgb(183, 218, 255), rgb(129, 181, 244)); }
+.btn-secondary { color:#0b1320; background:linear-gradient(180deg, rgb(225, 229, 237), rgb(195, 201, 214)); }
+.code-tools { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:16px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); }
+.code-tools input { width:180px; padding:12px 14px; border-radius:12px; border:1px solid rgba(255,255,255,.16); background:#0d1320; color:#eef2f7; font-size:15px; outline:none; }
+.code-tools input::placeholder { color:#93a2b8; }
+.code-tools .btn { min-width:112px; padding:12px 14px; font-size:15px; }
+.note { margin:10px auto 0; text-align:center; color:var(--muted); font-size:14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stage">
+    <div class="row">
+      <div class="screen-wrap">
+        <canvas id="screen" class="screen" width="768" height="512"></canvas>
+        <div class="overlay" id="hud"></div>
+        <div class="minimap-wrap">
+          <div class="minimap-title">Minimap</div>
+          <canvas id="minimap" class="minimap" width="190" height="190"></canvas>
+        </div>
+      </div>
+      <aside class="side">
+        <div class="side-card" id="message-panel"></div>
+      </aside>
+    </div>
+    <div class="controls">
+      <button id="turn-left" class="btn btn-secondary" type="button">좌회전</button>
+      <button id="move-forward" class="btn btn-primary" type="button">전진</button>
+      <button id="dash-forward" class="btn btn-primary" type="button">대시</button>
+      <button id="turn-right" class="btn btn-secondary" type="button">우회전</button>
+      <button id="reset-run" class="btn btn-secondary" type="button">초기화</button>
+      <div class="code-tools">
+        <input id="secret-code-input" type="text" maxlength="10" spellcheck="false" autocomplete="off" placeholder="비밀 코드 10자리" />
+        <button id="apply-secret-code" class="btn btn-secondary" type="button">코드 사용</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const DATA = {"title": "Colored Message Maze", "grid": ["OXOOOXOXOXOXOXOXOXO", "OXXXXXOXXXXXOXXXOXX", "OXOXOOOXOOOXOXOXOXO", "XXXXXXXXOXXXXXXXOXO", "OOOXOXOXOOOXOXOXOXO", "OXOXXXXXXXXXXXXXXXX", "OXOOOOOXOOOXOXOXOOO", "XXXXOXOXOXXXXXXXXXX", "OXOOOXOXOOOXOOOXOOO", "XXXXXXXXXXXXXXOXXXO", "OXOXOXOXOXOXOXOXOOO", "XXXXXXXXXXXXXXOXOXX", "OXOXOXOOOXOXOXOXOXO", "XXOXOXXXOXXXOXOXXXX", "OXOXOXOOOXOOOOOOOXO", "XXXXOXOXXXXXOXOXXXX", "OXOXOXOXOXOXOOOOOOO", "XXXXOXXXXXOXOXXXXXX", "OXOXOOOXOXOXOXOXOOO"], "labels": {"3,0": {"text": "IAGAE", "axis": "ew"}, "0,1": {"text": "CI", "axis": "ns"}, "6,1": {"text": "IL", "axis": "ns"}, "12,1": {"text": "O", "axis": "ns"}, "16,1": {"text": "A", "axis": "ns"}, "5,2": {"text": "ER", "axis": "ew"}, "9,2": {"text": "M", "axis": "ew"}, "8,3": {"text": "IN", "axis": "ns"}, "16,3": {"text": "E", "axis": "ns"}, "18,3": {"text": "T", "axis": "ns"}, "1,4": {"text": "KI", "axis": "ew"}, "9,4": {"text": "ER", "axis": "ew"}, "0,5": {"text": "L", "axis": "ns"}, "2,5": {"text": "DOO", "axis": "ns"}, "3,6": {"text": "CRAT", "axis": "ew"}, "5,6": {"text": "YL", "axis": "ew"}, "9,6": {"text": "ENT", "axis": "ew"}, "17,6": {"text": "S", "axis": "ew"}, "4,7": {"text": "T", "axis": "ns"}, "6,7": {"text": "T", "axis": "ns"}, "8,7": {"text": "CS", "axis": "ns"}, "3,8": {"text": "TE", "axis": "ew"}, "9,8": {"text": "I", "axis": "ew"}, "13,8": {"text": "A", "axis": "ew"}, "17,8": {"text": "R", "axis": "ew"}, "14,9": {"text": "LTA", "axis": "ns"}, "18,9": {"text": "G", "axis": "ns"}, "17,10": {"text": "T", "axis": "ew"}, "14,11": {"text": "GGER", "axis": "ns"}, "16,11": {"text": "S", "axis": "ns"}, "7,12": {"text": "OI", "axis": "ew"}, "2,13": {"text": "ITSA", "axis": "ns"}, "4,13": {"text": "N", "axis": "ns"}, "8,13": {"text": "A", "axis": "ns"}, "12,13": {"text": "V", "axis": "ns"}, "14,13": {"text": "RI", "axis": "ns"}, "7,14": {"text": "AD", "axis": "ew"}, "11,14": {"text": "E", "axis": "ew"}, "13,14": {"text": "TOK", "axis": "ew"}, "15,14": {"text": "AK", "axis": "ew"}, "4,15": {"text": "S", "axis": "ns"}, "6,15": {"text": "EU", "axis": "ns"}, "12,15": {"text": "M", "axis": "ns"}, "14,15": {"text": "T", "axis": "ns"}, "13,16": {"text": "G", "axis": "ew"}, "15,16": {"text": "NIL", "axis": "ew"}, "17,16": {"text": "O", "axis": "ew"}, "4,17": {"text": "N", "axis": "ns"}, "10,17": {"text": "IN", "axis": "ns"}, "12,17": {"text": "NO", "axis": "ns"}, "5,18": {"text": "CAR", "axis": "ew"}, "17,18": {"text": "T", "axis": "ew"}}, "floorColors": {"0,16": [130, 104, 232], "2,8": [67, 192, 101], "8,14": [178, 123, 63], "10,4": [243, 180, 56], "10,12": [193, 148, 219], "10,18": [121, 199, 255], "12,2": [86, 124, 255], "14,6": [62, 170, 152], "14,10": [255, 145, 61], "18,14": [72, 196, 217], "0,0": [0, 0, 0]}, "cellMessages": {"0,16": {"title": "문제 발견!", "bodyEnc": "DgXGB3EHCvKxxUSWD4Jw7a+wvMbAZ5KsBTL3wiwa+7horJr820OXOA4rBmxvm+pcGD7ozutwor3ySQ==", "highlight_red": false}, "2,8": {"title": "문제 발견!", "bodyEnc": "oLi5AqUxwOk4N7OsHbufxxfbm4zByGHzcPujadeaIVMk5h+VmudYy8eKc4JKGBV3O6XlV0dtzmh8Hg==", "highlight_red": false}, "8,14": {"title": "문제 발견!", "bodyEnc": "K+rPs2Kug8k5NI6YrChYCYGr69EEt2fdgq1w8gdYF1e1KEZKC+GFT17fAUdjEIBULGPbDe2OAAmRMw==", "highlight_red": false}, "10,4": {"title": "문제 발견!", "bodyEnc": "lO8lcvuwRc0h0PbYmMyUSNJfZUkac9aE96H44oj8rb/GPn6GFMEwXJwjDaK/2vT9gt6smj2uOm+F/A==", "highlight_red": false}, "10,12": {"title": "문제 발견!", "bodyEnc": "ZGFlY0eCEE3RvNeqNjcEto0kfqS89ILPEfjcpPj+XgVg/K3nfWNPT7QmP+5TbyvNgebLUG59BqpH6w==", "highlight_red": false}, "10,18": {"title": "문제 발견!", "bodyEnc": "QvsIfsSoQOuPMDGqpgaeYahmKvQsS5y+nx45Md7YbbozxbIblq+esSq5qpsuXb6Dy9dtgf1FYE4GAQ==", "highlight_red": false}, "12,2": {"title": "문제 발견!", "bodyEnc": "IPTu91PT6n034I0FmAzkjHqcGyMEMzFeoFCa4Miluufc0G0JtgbA6IyyKZpPYDPzMUffa/owg/4GPw==", "highlight_red": false}, "14,6": {"title": "문제 발견!", "bodyEnc": "NWDW6ZJrzPNvi6HCi+RQzGKxQVlOn6AVqzSV56oGli+uZVolImesEzxtLDpkKUhlccLstXtMRaxSXg==", "highlight_red": false}, "14,10": {"title": "문제 발견!", "bodyEnc": "T9wjckWUlXLAp8VOZhMf9TjDq4dbJQe7w/Sx89Ba+TD8OpckG4ausWBtWa3sFePtpt6Q9GJzz8+L0Q==", "highlight_red": false}, "18,14": {"title": "문제 발견!", "bodyEnc": "IWVBW8DoZg8DfJeStzOeJufiH2fsfmhdFiqhwmcjQoD3f/E/o94/edjeK4wPtaHSbI2Itozmv0AWFw==", "highlight_red": false}, "0,0": {"title": "문제 발견!", "bodyEnc": "nAIkiZ3wpfORzZT8q0a/H/foSbncx5zS8uFKD2KubjDLnCs69RNzTLy/6A6J/c2sbbBmJYgTbLlLug==", "highlight_red": false}}, "start": [18, 18], "startDir": "W", "dirNameKo": {"N": "북", "E": "동", "S": "남", "W": "서"}, "config": {"width": 768, "height": 512, "fov_deg": 78.0, "floor_ratio": 0.73, "eye_height_ratio": 0.74, "pitch_px": 0.0, "max_ray_distance": 60.0, "max_label_distance": 10.5, "label_quad_ratio": 0.5, "label_lift": 0.02, "wall_color_ns": [198, 205, 220], "wall_color_ew": [178, 186, 201], "outer_wall_color": [220, 226, 236], "sky_top": [13, 17, 27], "sky_bottom": [24, 31, 47], "floor_top": [72, 76, 85], "floor_bottom": [54, 57, 65], "grid_line_color": [110, 117, 132], "button_primary_top": [183, 218, 255], "button_primary_bottom": [129, 181, 244], "button_secondary_top": [225, 229, 237], "button_secondary_bottom": [195, 201, 214], "panel_bg": [13, 18, 29], "panel_fg": [239, 244, 250], "panel_muted": [184, 196, 214], "turn_duration_ms": 260, "move_duration_ms": 320, "dash_duration_ms": 240, "base_budget": 10, "bonus_per_code": 6, "dash_base_cost": 3, "minimap_hide_walls_and_labels": true}, "labelWarnings": [], "codeHashSalt": "c66b7d7db4857159f48f0af8a7fc5de2", "codeHashes": ["96ed9dd0b748867e5cb794de3f399843", "3a451f3a4fd91af395306781929b4b27", "dfa2b6504a7a2be5183463c5d5788d3a", "684447c84c34bb993c76cb4417adbb0e", "85614039d2ec4526006562d860d691aa", "542183b1e348ea891544c766b744b853", "361da12ff1e4d0505bef898545a2db14", "219d39b69ab30233e551f8ae1336100a", "d48d6ede7923911284935d6528188a08", "84f15f014dff5c9bf524788b7fe3c9ab"]};
+const DIR_ORDER = ["N", "E", "S", "W"];
+const DIRS = { N:[0,-1], E:[1,0], S:[0,1], W:[-1,0] };
+const canvas = document.getElementById('screen');
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = true;
+ctx.imageSmoothingQuality = 'high';
+const minimapCanvas = document.getElementById('minimap');
+const minimapCtx = minimapCanvas.getContext('2d');
+minimapCtx.imageSmoothingEnabled = true;
+minimapCtx.imageSmoothingQuality = 'high';
+const minimapStatic = document.createElement('canvas');
+minimapStatic.width = minimapCanvas.width;
+minimapStatic.height = minimapCanvas.height;
+const minimapStaticCtx = minimapStatic.getContext('2d');
+minimapStaticCtx.imageSmoothingEnabled = true;
+minimapStaticCtx.imageSmoothingQuality = 'high';
+const panel = document.getElementById('message-panel');
+const hud = document.getElementById('hud');
+const leftBtn = document.getElementById('turn-left');
+const forwardBtn = document.getElementById('move-forward');
+const dashBtn = document.getElementById('dash-forward');
+const rightBtn = document.getElementById('turn-right');
+const resetBtn = document.getElementById('reset-run');
+const secretCodeInput = document.getElementById('secret-code-input');
+const applySecretCodeBtn = document.getElementById('apply-secret-code');
+const CFG = DATA.config;
+const GRID = DATA.grid;
+const N = GRID.length;
+const LABELS = DATA.labels;
+const FLOOR_COLORS = DATA.floorColors;
+const CELL_MESSAGES = DATA.cellMessages;
+const labelTextureCache = new Map();
+const CODE_HASH_SALT = DATA.codeHashSalt;
+const CODE_HASHES = new Set(DATA.codeHashes);
+const REDEEM_STORAGE_KEY = `maze-secret-codes::${DATA.title}`;
+
+for (const warning of DATA.labelWarnings) {
+  console.warn(warning);
+}
+
+const state = {
+  x: DATA.start[0],
+  y: DATA.start[1],
+  dir: DATA.startDir,
+  px: DATA.start[0] + 0.5,
+  py: DATA.start[1] + 0.5,
+  angle: angleOf(DATA.startDir),
+  spentCost: 0,
+  dashUses: 0,
+  systemMessage: null,
+};
+let animation = null;
+const MINIMAP = (() => {
+  const outerPad = 12;
+  const innerSize = Math.min(minimapCanvas.width - outerPad * 2, minimapCanvas.height - outerPad * 2);
+  const cell = innerSize / N;
+  return { outerPad, innerSize, cell };
+})();
+const redeemedCodeHashes = loadRedeemedCodeHashes();
+
+function loadRedeemedCodeHashes() {
+  try {
+    const raw = localStorage.getItem(REDEEM_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((h) => CODE_HASHES.has(h)));
+  } catch (err) {
+    console.warn('비밀 코드 저장 상태를 불러오지 못했습니다.', err);
+    return new Set();
+  }
+}
+
+function saveRedeemedCodeHashes() {
+  try {
+    localStorage.setItem(REDEEM_STORAGE_KEY, JSON.stringify([...redeemedCodeHashes]));
+  } catch (err) {
+    console.warn('비밀 코드 저장 상태를 저장하지 못했습니다.', err);
+  }
+}
+
+function keyOf(x, y) {
+  return `${x},${y}`;
+}
+
+function inBounds(x, y) {
+  return x >= 0 && y >= 0 && x < N && y < N;
+}
+
+function isWalkable(x, y) {
+  return inBounds(x, y) && GRID[y][x] !== 'X';
+}
+
+function turnLeft(dir) {
+  return DIR_ORDER[(DIR_ORDER.indexOf(dir) + 3) % 4];
+}
+
+function turnRight(dir) {
+  return DIR_ORDER[(DIR_ORDER.indexOf(dir) + 1) % 4];
+}
+
+function angleOf(dir) {
+  const [dx, dy] = DIRS[dir];
+  return Math.atan2(dy, dx);
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function lerpPoint(a, b, t) {
+  return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), z: lerp(a.z, b.z, t) };
+}
+
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+function clamp255(v) {
+  return Math.max(0, Math.min(255, Math.round(v)));
+}
+
+function rgb(arr) {
+  return `rgb(${clamp255(arr[0])}, ${clamp255(arr[1])}, ${clamp255(arr[2])})`;
+}
+
+function shadeColor(arr, factor) {
+  return [arr[0] * factor, arr[1] * factor, arr[2] * factor];
+}
+
+function xmur3Int(str) {
+  let h = (1779033703 ^ str.length) >>> 0;
+  for (let i = 0; i < str.length; i += 1) {
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  h = Math.imul(h ^ (h >>> 16), 2246822507);
+  h = Math.imul(h ^ (h >>> 13), 3266489909);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function nextRand() {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function hashSecretCode(code) {
+  let out = '';
+  for (let i = 0; i < 4; i += 1) {
+    out += xmur3Int(`${CODE_HASH_SALT}:${code}|${i}`).toString(16).padStart(8, '0');
+  }
+  return out;
+}
+
+function decryptMessage(enc, x, y) {
+  const bytes = Uint8Array.from(atob(enc), (ch) => ch.charCodeAt(0));
+  const rand = mulberry32(xmur3Int(`${x},${y}|maze-msg|v1`));
+  for (let i = 0; i < bytes.length; i += 1) {
+    bytes[i] ^= Math.floor(rand() * 256);
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function totalBudget() {
+  return CFG.base_budget + redeemedCodeHashes.size * CFG.bonus_per_code;
+}
+
+function remainingBudget() {
+  return totalBudget() - state.spentCost;
+}
+
+function currentDashCost() {
+  return CFG.dash_base_cost + state.dashUses;
+}
+
+function setSystemMessage(title, body) {
+  state.systemMessage = { title, body };
+  updatePanel();
+}
+
+function clearSystemMessage() {
+  state.systemMessage = null;
+}
+
+function cameraPlane(angle) {
+  const planeLen = Math.tan((CFG.fov_deg * Math.PI / 180) / 2);
+  const dx = Math.cos(angle);
+  const dy = Math.sin(angle);
+  return [-dy * planeLen, dx * planeLen];
+}
+
+function worldToCamera(wx, wy, wz, px, py, angle) {
+  const dx = wx - px;
+  const dy = wy - py;
+  const [planeX, planeY] = cameraPlane(angle);
+  const planeLen = Math.hypot(planeX, planeY) || 1;
+  const rx = planeX / planeLen;
+  const ry = planeY / planeLen;
+  const fx = Math.cos(angle);
+  const fy = Math.sin(angle);
+  return {
+    x: dx * rx + dy * ry,
+    y: wz - CFG.eye_height_ratio,
+    z: dx * fx + dy * fy,
+  };
+}
+
+function screenHorizon() {
+  return CFG.height * (1 - CFG.floor_ratio) + CFG.pitch_px;
+}
+
+function projectFloorPoint(wx, wy, wz, px, py, angle) {
+  const cam = worldToCamera(wx, wy, wz, px, py, angle);
+  if (cam.z <= 0.05) return null;
+  const halfW = CFG.width / 2;
+  const horizon = screenHorizon();
+  const focal = halfW / Math.tan((CFG.fov_deg * Math.PI / 180) / 2);
+  return {
+    x: halfW + (cam.x * focal) / cam.z,
+    y: horizon - (cam.y * focal) / cam.z,
+    z: cam.z,
+  };
+}
+
+function drawBackground() {
+  const horizon = screenHorizon();
+  for (let y = 0; y < CFG.height; y += 1) {
+    if (y < horizon) {
+      const visibleSky = Math.max(1, Math.min(CFG.height, horizon));
+      const t = y / Math.max(1, visibleSky - 1);
+      const c = [
+        CFG.sky_top[0] * (1 - t) + CFG.sky_bottom[0] * t,
+        CFG.sky_top[1] * (1 - t) + CFG.sky_bottom[1] * t,
+        CFG.sky_top[2] * (1 - t) + CFG.sky_bottom[2] * t,
+      ];
+      ctx.fillStyle = rgb(c);
+    } else {
+      const startY = Math.max(0, horizon);
+      const visibleFloor = Math.max(1, CFG.height - startY);
+      const t = (y - startY) / Math.max(1, visibleFloor - 1);
+      const c = [
+        CFG.floor_top[0] * (1 - t) + CFG.floor_bottom[0] * t,
+        CFG.floor_top[1] * (1 - t) + CFG.floor_bottom[1] * t,
+        CFG.floor_top[2] * (1 - t) + CFG.floor_bottom[2] * t,
+      ];
+      ctx.fillStyle = rgb(c);
+    }
+    ctx.fillRect(0, y, CFG.width, 1);
+  }
+}
+
+function tileColor(x, y) {
+  const msg = CELL_MESSAGES[keyOf(x, y)];
+  if (msg && msg.highlight_red) return [215, 78, 78];
+  return FLOOR_COLORS[keyOf(x, y)] || [245, 245, 245];
+}
+
+function drawPolygon(points, fill) {
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i += 1) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+
+function drawFloorTiles(px, py, angle) {
+  const drawDistance = Math.ceil(CFG.max_label_distance + 3);
+  const cx = Math.floor(px);
+  const cy = Math.floor(py);
+  const quads = [];
+  for (let y = Math.max(0, cy - drawDistance); y <= Math.min(N - 1, cy + drawDistance); y += 1) {
+    for (let x = Math.max(0, cx - drawDistance); x <= Math.min(N - 1, cx + drawDistance); x += 1) {
+      if (!isWalkable(x, y)) continue;
+      const corners = [
+        projectFloorPoint(x, y, 0, px, py, angle),
+        projectFloorPoint(x + 1, y, 0, px, py, angle),
+        projectFloorPoint(x + 1, y + 1, 0, px, py, angle),
+        projectFloorPoint(x, y + 1, 0, px, py, angle),
+      ];
+      if (corners.some((p) => p === null)) continue;
+      const avgz = corners.reduce((acc, p) => acc + p.z, 0) / 4;
+      const shade = Math.max(0.48, Math.min(1.0, 1.05 - 0.055 * avgz));
+      quads.push({ points: corners, avgz, color: shadeColor(tileColor(x, y), shade) });
+    }
+  }
+  quads.sort((a, b) => b.avgz - a.avgz);
+  for (const quad of quads) {
+    drawPolygon(quad.points, rgb(quad.color));
+  }
+}
+
+function drawFloorGrid(px, py, angle) {
+  const drawDistance = Math.ceil(CFG.max_label_distance + 3);
+  const cx = Math.floor(px);
+  const cy = Math.floor(py);
+  const segments = [];
+  function maybeAdd(ax, ay, bx, by) {
+    const p1 = projectFloorPoint(ax, ay, 0, px, py, angle);
+    const p2 = projectFloorPoint(bx, by, 0, px, py, angle);
+    if (!p1 || !p2) return;
+    segments.push({ p1, p2, avgz: (p1.z + p2.z) / 2 });
+  }
+  for (let y = Math.max(0, cy - drawDistance); y <= Math.min(N - 1, cy + drawDistance); y += 1) {
+    for (let x = Math.max(0, cx - drawDistance); x <= Math.min(N - 1, cx + drawDistance); x += 1) {
+      if (!isWalkable(x, y)) continue;
+      maybeAdd(x, y, x + 1, y);
+      maybeAdd(x + 1, y, x + 1, y + 1);
+      maybeAdd(x + 1, y + 1, x, y + 1);
+      maybeAdd(x, y + 1, x, y);
+    }
+  }
+  segments.sort((a, b) => b.avgz - a.avgz);
+  for (const seg of segments) {
+    const shade = Math.max(0.18, Math.min(0.62, 0.78 - 0.055 * seg.avgz));
+    const c = shadeColor(CFG.grid_line_color, shade);
+    ctx.strokeStyle = rgb(c);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(seg.p1.x, seg.p1.y);
+    ctx.lineTo(seg.p2.x, seg.p2.y);
+    ctx.stroke();
+  }
+}
+
+function getLabelTexture(spec) {
+  const key = `${spec.text}|${spec.axis}`;
+  if (labelTextureCache.has(key)) return labelTextureCache.get(key);
+  const size = 1024;
+  const off = document.createElement('canvas');
+  off.width = size;
+  off.height = size;
+  const g = off.getContext('2d');
+  g.clearRect(0, 0, size, size);
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = 'high';
+  g.fillStyle = '#000';
+  g.strokeStyle = '#000';
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  const fontStack = '"Noto Sans KR","Malgun Gothic","Apple SD Gothic Neo","Segoe UI",Arial,sans-serif';
+  if (spec.axis === 'ew') {
+    let fontSize = Math.floor(size * 0.34);
+    while (fontSize > 64) {
+      g.font = `700 ${fontSize}px ${fontStack}`;
+      if (g.measureText(spec.text).width <= size * 0.84) break;
+      fontSize -= 8;
+    }
+    g.font = `700 ${fontSize}px ${fontStack}`;
+    g.lineWidth = Math.max(6, Math.floor(fontSize * 0.08));
+    g.strokeText(spec.text, size / 2, size / 2 - size * 0.02);
+    g.fillText(spec.text, size / 2, size / 2 - size * 0.02);
+  } else {
+    const letters = Array.from(spec.text);
+    let fontSize = Math.floor(size * 0.22);
+    g.font = `700 ${fontSize}px ${fontStack}`;
+    const gap = Math.max(8, Math.floor(size * 0.02));
+    const totalH = letters.length * fontSize + (letters.length - 1) * gap;
+    if (totalH > size * 0.82) {
+      fontSize = Math.floor((size * 0.82 - (letters.length - 1) * gap) / Math.max(1, letters.length));
+      g.font = `700 ${fontSize}px ${fontStack}`;
+    }
+    g.lineWidth = Math.max(6, Math.floor(fontSize * 0.08));
+    const actualGap = Math.max(8, Math.floor(fontSize * 0.18));
+    const totalActual = letters.length * fontSize + (letters.length - 1) * actualGap;
+    let y = (size - totalActual) / 2 + fontSize / 2;
+    for (const ch of letters) {
+      g.strokeText(ch, size / 2, y);
+      g.fillText(ch, size / 2, y);
+      y += fontSize + actualGap;
+    }
+  }
+  labelTextureCache.set(key, off);
+  return off;
+}
+
+function drawProjectedTexture(tex, quad) {
+  const strips = 64;
+  for (let i = 0; i < strips; i += 1) {
+    const v0 = i / strips;
+    const v1 = (i + 1) / strips;
+    const tl = lerpPoint(quad[0], quad[3], v0);
+    const tr = lerpPoint(quad[1], quad[2], v0);
+    const bl = lerpPoint(quad[0], quad[3], v1);
+    const br = lerpPoint(quad[1], quad[2], v1);
+    const sh = Math.max(1, tex.height * (v1 - v0));
+    const sy = tex.height * v0;
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.beginPath();
+    ctx.moveTo(tl.x, tl.y);
+    ctx.lineTo(tr.x, tr.y);
+    ctx.lineTo(br.x, br.y);
+    ctx.lineTo(bl.x, bl.y);
+    ctx.closePath();
+    ctx.clip();
+    ctx.setTransform(
+      (tr.x - tl.x) / tex.width,
+      (tr.y - tl.y) / tex.width,
+      (bl.x - tl.x) / sh,
+      (bl.y - tl.y) / sh,
+      tl.x,
+      tl.y,
+    );
+    ctx.drawImage(tex, 0, sy, tex.width, sh, 0, 0, tex.width, sh);
+    ctx.restore();
+  }
+}
+
+function drawLabels(px, py, angle) {
+  const items = [];
+  for (const [key, spec] of Object.entries(LABELS)) {
+    const [x, y] = key.split(',').map(Number);
+    const dx = (x + 0.5) - px;
+    const dy = (y + 0.5) - py;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= CFG.max_label_distance) items.push({ x, y, spec, dist });
+  }
+  items.sort((a, b) => b.dist - a.dist);
+  const r = CFG.label_quad_ratio / 2;
+  for (const item of items) {
+    const cx = item.x + 0.5;
+    const cy = item.y + 0.5;
+    const quad = [
+      projectFloorPoint(cx - r, cy - r, CFG.label_lift, px, py, angle),
+      projectFloorPoint(cx + r, cy - r, CFG.label_lift, px, py, angle),
+      projectFloorPoint(cx + r, cy + r, CFG.label_lift, px, py, angle),
+      projectFloorPoint(cx - r, cy + r, CFG.label_lift, px, py, angle),
+    ];
+    if (quad.some((p) => p === null)) continue;
+    drawProjectedTexture(getLabelTexture(item.spec), quad);
+  }
+}
+
+function drawWalls(px, py, angle) {
+  const [planeX, planeY] = cameraPlane(angle);
+  const dirX = Math.cos(angle);
+  const dirY = Math.sin(angle);
+  const horizon = screenHorizon();
+  const focal = (CFG.width / 2) / Math.tan((CFG.fov_deg * Math.PI / 180) / 2);
+  const wallTopHeight = 1 - CFG.eye_height_ratio;
+  const wallBottomHeight = CFG.eye_height_ratio;
+  for (let x = 0; x < CFG.width; x += 1) {
+    const cameraX = 2 * x / Math.max(1, CFG.width - 1) - 1;
+    const rayDirX = dirX + planeX * cameraX;
+    const rayDirY = dirY + planeY * cameraX;
+    let mapX = Math.floor(px);
+    let mapY = Math.floor(py);
+    const deltaDistX = Math.abs(rayDirX) > 1e-9 ? Math.abs(1 / rayDirX) : 1e30;
+    const deltaDistY = Math.abs(rayDirY) > 1e-9 ? Math.abs(1 / rayDirY) : 1e30;
+    let stepX, stepY, sideDistX, sideDistY;
+    if (rayDirX < 0) {
+      stepX = -1;
+      sideDistX = (px - mapX) * deltaDistX;
+    } else {
+      stepX = 1;
+      sideDistX = (mapX + 1 - px) * deltaDistX;
+    }
+    if (rayDirY < 0) {
+      stepY = -1;
+      sideDistY = (py - mapY) * deltaDistY;
+    } else {
+      stepY = 1;
+      sideDistY = (mapY + 1 - py) * deltaDistY;
+    }
+    let hit = false;
+    let side = 0;
+    let outside = false;
+    let perpDist = CFG.max_ray_distance;
+    while (!hit) {
+      if (sideDistX < sideDistY) {
+        sideDistX += deltaDistX;
+        mapX += stepX;
+        side = 0;
+      } else {
+        sideDistY += deltaDistY;
+        mapY += stepY;
+        side = 1;
+      }
+      if (!inBounds(mapX, mapY)) {
+        hit = true;
+        outside = true;
+        perpDist = side === 0 ? sideDistX - deltaDistX : sideDistY - deltaDistY;
+        break;
+      }
+      if (GRID[mapY][mapX] === 'X') {
+        hit = true;
+        perpDist = side === 0 ? sideDistX - deltaDistX : sideDistY - deltaDistY;
+        break;
+      }
+      if (perpDist > CFG.max_ray_distance) break;
+    }
+    perpDist = Math.max(0.05, perpDist);
+    const drawStart = Math.max(0, Math.floor(horizon - (focal * wallTopHeight) / perpDist));
+    const drawEnd = Math.min(CFG.height - 1, Math.floor(horizon + (focal * wallBottomHeight) / perpDist));
+    let base = CFG.outer_wall_color;
+    if (!outside) base = side === 1 ? CFG.wall_color_ns : CFG.wall_color_ew;
+    let shade = Math.max(0.38, Math.min(1.0, 1.14 - 0.06 * perpDist));
+    if (side === 0 && !outside) shade *= 0.94;
+    ctx.fillStyle = rgb(shadeColor(base, shade));
+    ctx.fillRect(x, drawStart, 1, Math.max(0, drawEnd - drawStart + 1));
+  }
+}
+
+function escapeHtml(text) {
+  return text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function minimapCellRect(x, y) {
+  return {
+    x: MINIMAP.outerPad + x * MINIMAP.cell,
+    y: MINIMAP.outerPad + y * MINIMAP.cell,
+    w: MINIMAP.cell,
+    h: MINIMAP.cell,
+  };
+}
+
+function drawMinimapLabel(targetCtx, spec, cx, cy, cellSize) {
+  targetCtx.save();
+  targetCtx.translate(cx, cy);
+  if (spec.axis === 'ns') targetCtx.rotate(-Math.PI / 2);
+  const fontSize = Math.max(6, Math.floor(cellSize * (spec.text.length <= 2 ? 0.44 : 0.28)));
+  targetCtx.font = `700 ${fontSize}px "Noto Sans KR","Malgun Gothic","Apple SD Gothic Neo","Segoe UI",sans-serif`;
+  targetCtx.textAlign = 'center';
+  targetCtx.textBaseline = 'middle';
+  targetCtx.fillStyle = 'rgba(10,14,20,.92)';
+  targetCtx.strokeStyle = 'rgba(255,255,255,.70)';
+  targetCtx.lineWidth = Math.max(1.25, fontSize * 0.10);
+  targetCtx.strokeText(spec.text, 0, 0);
+  targetCtx.fillText(spec.text, 0, 0);
+  targetCtx.restore();
+}
+
+function buildMinimapStatic() {
+  minimapStaticCtx.setTransform(1, 0, 0, 1, 0, 0);
+  minimapStaticCtx.clearRect(0, 0, minimapStatic.width, minimapStatic.height);
+  minimapStaticCtx.fillStyle = '#0d1320';
+  minimapStaticCtx.fillRect(0, 0, minimapStatic.width, minimapStatic.height);
+  minimapStaticCtx.fillStyle = 'rgba(255,255,255,.03)';
+  minimapStaticCtx.fillRect(MINIMAP.outerPad, MINIMAP.outerPad, MINIMAP.innerSize, MINIMAP.innerSize);
+  const hideWallsAndLabels = !!CFG.minimap_hide_walls_and_labels;
+  const hiddenCellColor = 'rgba(255,255,255,.10)';
+  for (let y = 0; y < N; y += 1) {
+    for (let x = 0; x < N; x += 1) {
+      const r = minimapCellRect(x, y);
+      if (hideWallsAndLabels) {
+        const hasMarkedColor = Object.prototype.hasOwnProperty.call(FLOOR_COLORS, keyOf(x, y));
+        minimapStaticCtx.fillStyle = hasMarkedColor ? rgb(tileColor(x, y)) : hiddenCellColor;
+      } else {
+        minimapStaticCtx.fillStyle = isWalkable(x, y) ? rgb(tileColor(x, y)) : '#313846';
+      }
+      minimapStaticCtx.fillRect(r.x, r.y, r.w, r.h);
+      minimapStaticCtx.strokeStyle = hideWallsAndLabels ? 'rgba(255,255,255,.08)' : 'rgba(255,255,255,.12)';
+      minimapStaticCtx.lineWidth = 1;
+      minimapStaticCtx.strokeRect(r.x, r.y, r.w, r.h);
+    }
+  }
+  if (!hideWallsAndLabels) {
+    for (const [key, spec] of Object.entries(LABELS)) {
+      const [x, y] = key.split(',').map(Number);
+      const r = minimapCellRect(x, y);
+      drawMinimapLabel(minimapStaticCtx, spec, r.x + r.w / 2, r.y + r.h / 2, r.w);
+    }
+  }
+  minimapStaticCtx.strokeStyle = 'rgba(255,255,255,.22)';
+  minimapStaticCtx.lineWidth = 2;
+  minimapStaticCtx.strokeRect(MINIMAP.outerPad, MINIMAP.outerPad, MINIMAP.innerSize, MINIMAP.innerSize);
+}
+
+function drawMinimap() {
+  minimapCtx.setTransform(1, 0, 0, 1, 0, 0);
+  minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
+  minimapCtx.drawImage(minimapStatic, 0, 0);
+  const px = MINIMAP.outerPad + (state.px - 0.5) * MINIMAP.cell + MINIMAP.cell / 2;
+  const py = MINIMAP.outerPad + (state.py - 0.5) * MINIMAP.cell + MINIMAP.cell / 2;
+  const current = minimapCellRect(state.x, state.y);
+  minimapCtx.strokeStyle = 'rgba(255,80,80,.95)';
+  minimapCtx.lineWidth = Math.max(2, MINIMAP.cell * 0.12);
+  minimapCtx.strokeRect(current.x + 1, current.y + 1, Math.max(0, current.w - 2), Math.max(0, current.h - 2));
+  minimapCtx.fillStyle = 'rgba(255,72,72,.98)';
+  minimapCtx.beginPath();
+  minimapCtx.arc(px, py, Math.max(3, MINIMAP.cell * 0.18), 0, Math.PI * 2);
+  minimapCtx.fill();
+  const arrowLen = Math.max(8, MINIMAP.cell * 0.42);
+  minimapCtx.strokeStyle = 'rgba(255,72,72,.98)';
+  minimapCtx.lineWidth = Math.max(2, MINIMAP.cell * 0.16);
+  minimapCtx.beginPath();
+  minimapCtx.moveTo(px, py);
+  minimapCtx.lineTo(px + Math.cos(state.angle) * arrowLen, py + Math.sin(state.angle) * arrowLen);
+  minimapCtx.stroke();
+  minimapCtx.fillStyle = 'rgba(241,245,251,.95)';
+  minimapCtx.font = '700 12px "Noto Sans KR","Malgun Gothic",sans-serif';
+  minimapCtx.textAlign = 'left';
+  minimapCtx.textBaseline = 'top';
+  minimapCtx.fillText(`(${state.x}, ${state.y}) ${DATA.dirNameKo[state.dir]}`, 10, minimapCanvas.height - 18);
+}
+
+function currentCellMessage() {
+  const msg = CELL_MESSAGES[keyOf(state.x, state.y)];
+  if (!msg) return null;
+  return {
+    title: msg.title,
+    body: decryptMessage(msg.bodyEnc, state.x, state.y),
+  };
+}
+
+function updatePanel() {
+  const shown = state.systemMessage || currentCellMessage();
+  if (!shown) {
+    panel.innerHTML = '<h2>메시지</h2><p class="message-empty"></p>';
+  } else {
+    panel.innerHTML = `
+      <h2>메시지</h2>
+      <h2>${escapeHtml(shown.title)}</h2>
+      <p class="message-body">${escapeHtml(shown.body).replaceAll('\n', '<br />')}</p>
+    `;
+  }
+  hud.textContent =
+    `남은 비용 ${remainingBudget()} / ${totalBudget()}  ·  다음 대시 비용 ${currentDashCost()}\n` +
+    `사용한 대시 ${state.dashUses}  ·  적용된 코드 ${redeemedCodeHashes.size} / ${CODE_HASHES.size}`;
+}
+
+function updateButtons() {
+  const busy = animation !== null;
+  leftBtn.disabled = busy;
+  rightBtn.disabled = busy;
+  forwardBtn.disabled = busy;
+  dashBtn.disabled = busy;
+  resetBtn.disabled = busy;
+  applySecretCodeBtn.disabled = busy;
+  secretCodeInput.disabled = busy;
+}
+
+function resetRun() {
+  if (animation) return;
+  state.x = DATA.start[0];
+  state.y = DATA.start[1];
+  state.dir = DATA.startDir;
+  state.px = state.x + 0.5;
+  state.py = state.y + 0.5;
+  state.angle = angleOf(state.dir);
+  state.spentCost = 0;
+  state.dashUses = 0;
+  clearSystemMessage();
+  updatePanel();
+  updateButtons();
+}
+
+function startTurn(step) {
+  if (animation) return;
+  clearSystemMessage();
+  animation = {
+    type: 'turn',
+    start: performance.now(),
+    duration: CFG.turn_duration_ms,
+    baseAngle: angleOf(state.dir),
+    deltaAngle: step * Math.PI / 2,
+    nextDir: step < 0 ? turnLeft(state.dir) : turnRight(state.dir),
+  };
+  updateButtons();
+}
+
+function startMove() {
+  if (animation) return;
+  if (remainingBudget() < 1) {
+    setSystemMessage('이동 실패', '비용이 부족하여 이동할 수 없습니다.');
+    return;
+  }
+  const [dx, dy] = DIRS[state.dir];
+  const nx = state.x + dx;
+  const ny = state.y + dy;
+  if (!isWalkable(nx, ny)) {
+    setSystemMessage('이동 실패', '전진할 수 없습니다.');
+    return;
+  }
+  clearSystemMessage();
+  animation = {
+    type: 'move',
+    start: performance.now(),
+    duration: CFG.move_duration_ms,
+    fromX: state.x + 0.5,
+    fromY: state.y + 0.5,
+    toX: nx + 0.5,
+    toY: ny + 0.5,
+    nx, ny,
+    angle: angleOf(state.dir),
+    cost: 1,
+  };
+  updateButtons();
+}
+
+function startDash() {
+  if (animation) return;
+  const cost = currentDashCost();
+  if (remainingBudget() < cost) {
+    setSystemMessage('이동 실패', '비용이 부족하여 대시할 수 없습니다.');
+    return;
+  }
+  const [dx, dy] = DIRS[state.dir];
+  const nx = state.x + dx * 2;
+  const ny = state.y + dy * 2;
+  if (!isWalkable(nx, ny)) {
+    setSystemMessage('이동 실패', '대시 이동이 불가능합니다.');
+    return;
+  }
+  clearSystemMessage();
+  animation = {
+    type: 'dash',
+    start: performance.now(),
+    duration: CFG.dash_duration_ms,
+    fromX: state.x + 0.5,
+    fromY: state.y + 0.5,
+    toX: nx + 0.5,
+    toY: ny + 0.5,
+    nx, ny,
+    angle: angleOf(state.dir),
+    cost,
+  };
+  updateButtons();
+}
+
+function applyAnimationCostAndState() {
+  if (animation.type === 'move') {
+    state.spentCost += animation.cost;
+  } else if (animation.type === 'dash') {
+    state.spentCost += animation.cost;
+    state.dashUses += 1;
+  }
+}
+
+function commitAnimation(now) {
+  if (!animation) {
+    state.px = state.x + 0.5;
+    state.py = state.y + 0.5;
+    state.angle = angleOf(state.dir);
+    return;
+  }
+  const t = Math.min(1, (now - animation.start) / animation.duration);
+  const e = easeInOutCubic(t);
+  if (animation.type === 'turn') {
+    state.px = state.x + 0.5;
+    state.py = state.y + 0.5;
+    state.angle = animation.baseAngle + animation.deltaAngle * e;
+  } else {
+    state.px = lerp(animation.fromX, animation.toX, e);
+    state.py = lerp(animation.fromY, animation.toY, e);
+    state.angle = animation.angle;
+  }
+  if (t >= 1) {
+    if (animation.type === 'turn') {
+      state.dir = animation.nextDir;
+      state.angle = angleOf(state.dir);
+    } else {
+      state.x = animation.nx;
+      state.y = animation.ny;
+      state.px = animation.toX;
+      state.py = animation.toY;
+      applyAnimationCostAndState();
+    }
+    animation = null;
+    clearSystemMessage();
+    updatePanel();
+    updateButtons();
+  }
+}
+
+function applySecretCode() {
+  const code = secretCodeInput.value.trim();
+  if (code.length !== 10) {
+    setSystemMessage('코드 실패', '비밀 코드는 10자리여야 합니다.');
+    return;
+  }
+  const hashed = hashSecretCode(code);
+  if (!CODE_HASHES.has(hashed)) {
+    setSystemMessage('코드 실패', '올바르지 않은 비밀 코드입니다.');
+    return;
+  }
+  if (redeemedCodeHashes.has(hashed)) {
+    setSystemMessage('코드 실패', '이미 사용한 비밀 코드입니다.');
+    return;
+  }
+  redeemedCodeHashes.add(hashed);
+  saveRedeemedCodeHashes();
+  secretCodeInput.value = '';
+  setSystemMessage('코드 적용', `사용 가능한 총 비용이 +${CFG.bonus_per_code} 증가했습니다.`);
+  updatePanel();
+}
+
+function render() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, CFG.width, CFG.height);
+  drawBackground();
+  drawFloorTiles(state.px, state.py, state.angle);
+  drawFloorGrid(state.px, state.py, state.angle);
+  drawLabels(state.px, state.py, state.angle);
+  drawWalls(state.px, state.py, state.angle);
+  drawMinimap();
+}
+
+function tick(now) {
+  commitAnimation(now);
+  render();
+  requestAnimationFrame(tick);
+}
+
+leftBtn.addEventListener('click', () => startTurn(-1));
+rightBtn.addEventListener('click', () => startTurn(1));
+forwardBtn.addEventListener('click', () => startMove());
+dashBtn.addEventListener('click', () => startDash());
+resetBtn.addEventListener('click', () => resetRun());
+applySecretCodeBtn.addEventListener('click', () => applySecretCode());
+secretCodeInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    applySecretCode();
+  }
+});
+window.addEventListener('keydown', (event) => {
+  if (event.target === secretCodeInput) return;
+  if (event.key === 'ArrowLeft' || event.key === 'a' || event.key === 'A') {
+    event.preventDefault();
+    startTurn(-1);
+  } else if (event.key === 'ArrowRight' || event.key === 'd' || event.key === 'D') {
+    event.preventDefault();
+    startTurn(1);
+  } else if (event.key === 'ArrowUp' || event.key === 'w' || event.key === 'W' || event.key === ' ') {
+    event.preventDefault();
+    startMove();
+  } else if (event.key === 'e' || event.key === 'E') {
+    event.preventDefault();
+    startDash();
+  } else if (event.key === 'r' || event.key === 'R') {
+    event.preventDefault();
+    resetRun();
+  }
+});
+
+buildMinimapStatic();
+updatePanel();
+updateButtons();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
